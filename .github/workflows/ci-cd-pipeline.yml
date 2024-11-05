@@ -1,47 +1,56 @@
-# .github/workflows/ci-cd-pipeline.yml
+name: GKE CI/CD Pipeline
 
-name: CI/CD Pipeline
-
-# Trigger workflow on pushes and pull requests to the main branch
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
-  # Job to build and test
-  build-and-test:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Check out code
-      - name: Checkout repository
+      - name: Check out the code
         uses: actions/checkout@v2
 
-      # Step 2: Set up Node.js
-      - name: Set up Node.js
-        uses: actions/setup-node@v2
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
         with:
-          node-version: "14"
+          service_account_key: ${{ secrets.GKE_SA_KEY }}
+          project_id: ${{ secrets.GKE_PROJECT }}
 
-      # Step 3: Install dependencies
-      - name: Install dependencies
-        run: npm install
+      - name: Configure Docker to use Google Cloud Registry
+        run: |
+          gcloud auth configure-docker
 
-      # Step 4: Run tests
-      - name: Run tests
-        run: npm test
+      - name: Build and push Docker image
+        env:
+          IMAGE_NAME: gcr.io/${{ secrets.GKE_PROJECT }}/my-app
+        run: |
+          docker build -t $IMAGE_NAME:$GITHUB_SHA .
+          docker push $IMAGE_NAME:$GITHUB_SHA
 
-  # Job to deploy (example: just a mock step for local deployment)
   deploy:
     runs-on: ubuntu-latest
-    needs: build-and-test # Ensures deploy only runs if build-and-test succeeds
+    needs: build
 
     steps:
-      - name: Checkout repository
+      - name: Check out the code
         uses: actions/checkout@v2
 
-      # Mock deployment step
-      - name: Deploy
-        run: echo "Deploying application..."
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          service_account_key: ${{ secrets.GKE_SA_KEY }}
+          project_id: ${{ secrets.GKE_PROJECT }}
+
+      - name: Connect to GKE cluster
+        run: |
+          gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER }} --zone ${{ secrets.GKE_ZONE }} --project ${{ secrets.GKE_PROJECT }}
+
+      - name: Deploy to GKE
+        env:
+          IMAGE_NAME: gcr.io/${{ secrets.GKE_PROJECT }}/myweb
+        run: |
+          kubectl set image deployment/my-app my-app=$IMAGE_NAME:$GITHUB_SHA
